@@ -38,8 +38,8 @@ void pack_icmp(void *buf);
 struct in_addr get_local_ip();
 int test_alive(struct in_addr ip);  
 int scan_ports(struct in_addr ip);
+int discover_hosts();
 struct in_addr alive_ips[255];
-
 
 int main(int argc, char const *argv[])
 {
@@ -204,6 +204,16 @@ int test_alive(struct in_addr ip)
             return 1;
         }
     }
+}
+
+/*
+* return the count of hosts alive
+*/
+int discover_hosts()
+{
+    memset(alive_ips, 0, 255 * sizeof(in_addr));
+    int i;
+
 }
 
 /*
