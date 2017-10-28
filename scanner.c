@@ -44,8 +44,14 @@ struct in_addr alive_ips[255];
 int main(int argc, char const *argv[])
 {
     char *test_ip = "192.168.109.137";
+    char *test_ip1 = "192.168.109.138";
+    char *test_ip2 = "192.168.109.13";
     struct in_addr ip;
     inet_aton(test_ip, &ip);
+    test_alive(ip);
+    inet_aton(test_ip1, &ip);
+    test_alive(ip);
+    inet_aton(test_ip2, &ip);
     test_alive(ip);
 	return 0;
 }
@@ -155,6 +161,7 @@ int test_alive(struct in_addr ip)
     setsockopt(sockfd, SOL_SOCKET, SO_RCVBUF, &size, sizeof(size));
 
     printf("[+] ping target: %s\n", inet_ntoa(dest_addr.sin_addr));
+    pack_icmp(send_buf);
     errno = sendto(sockfd, send_buf, 64, 0, (struct sockaddr *)&dest_addr, sizeof(dest_addr));
     if( errno < 0 )
     {
@@ -163,7 +170,7 @@ int test_alive(struct in_addr ip)
     }
 
     fcntl(sockfd, F_SETFL, O_NONBLOCK);
-    struct timeval time = {2, 0};
+    struct timeval time = {1, 0};
     fd_set set;
     FD_ZERO(&set);
     FD_SET(sockfd, &set);
