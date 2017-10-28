@@ -53,7 +53,7 @@ int main(int argc, char const *argv[])
     test_alive(ip);
     inet_aton(test_ip2, &ip);
     test_alive(ip);
-	return 0;
+    return 0;
 }
 
 int chksum(unsigned short *buf, int size)  
