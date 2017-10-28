@@ -43,16 +43,11 @@ struct in_addr alive_ips[255];
 
 int main(int argc, char const *argv[])
 {
-    char *test_ip = "192.168.109.137";
-    char *test_ip1 = "192.168.109.138";
-    char *test_ip2 = "192.168.109.13";
     struct in_addr ip;
+    char *test_ip = "192.168.109.9";
     inet_aton(test_ip, &ip);
     test_alive(ip);
-    inet_aton(test_ip1, &ip);
-    test_alive(ip);
-    inet_aton(test_ip2, &ip);
-    test_alive(ip);
+    //discover_hosts();
     return 0;
 }
 
@@ -126,7 +121,10 @@ struct in_addr get_local_ip()
     memcpy(&addr, &ifr.ifr_addr, sizeof(addr));
     memcpy(&ip, &(addr.sin_addr), sizeof(struct in_addr));
 
-    printf("[+] local network address: %s\n", inet_ntoa(ip));
+    #ifdef DEBUG
+      printf("[+] local network address: %s\n", inet_ntoa(ip));
+    #endif
+
     close(sock);
     return ip;
 }
@@ -138,7 +136,7 @@ struct in_addr get_local_ip()
 */
 int test_alive(struct in_addr ip)
 {
-    int i, count;
+    int i;
     int errono;
     int size = 50 * 1024 ;
     int sockfd;
@@ -160,7 +158,6 @@ int test_alive(struct in_addr ip)
     }
     setsockopt(sockfd, SOL_SOCKET, SO_RCVBUF, &size, sizeof(size));
 
-    printf("[+] ping target: %s\n", inet_ntoa(dest_addr.sin_addr));
     pack_icmp(send_buf);
     errno = sendto(sockfd, send_buf, 64, 0, (struct sockaddr *)&dest_addr, sizeof(dest_addr));
     if( errno < 0 )
@@ -179,7 +176,9 @@ int test_alive(struct in_addr ip)
 
     if( ret == - 1)
     {
-        perror("[-] select error");
+        #ifdef DEBUG
+          perror("[-] select error");
+        #endif
         close(sockfd);
         free(send_buf);
         send_buf = NULL;
@@ -187,7 +186,9 @@ int test_alive(struct in_addr ip)
     }
     else if( ret == 0 )
     {
-        printf("[-] timeout!\n");
+        #ifdef DEBUG
+          printf("[-] timeout!\n");
+        #endif
         close(sockfd);
         free(send_buf);
         send_buf = NULL;
@@ -197,7 +198,9 @@ int test_alive(struct in_addr ip)
     {
         if( FD_ISSET(sockfd, &set) )
         {
-            printf("[+] %s is alive.\n", inet_ntoa(ip));
+            #ifdef DEBUG
+              printf("[+] %s is alive.\n", inet_ntoa(ip));
+            #endif
             close(sockfd);
             free(send_buf);
             send_buf = NULL;
@@ -211,9 +214,43 @@ int test_alive(struct in_addr ip)
 */
 int discover_hosts()
 {
-    memset(alive_ips, 0, 255 * sizeof(in_addr));
-    int i;
+    memset(alive_ips, 0, 255 * sizeof(struct in_addr));
+    struct in_addr local_net_ip, ip; //big endian
+    unsigned int local_host_ip;  //little endian
+    int count = 0;
 
+    local_net_ip = get_local_ip();
+    local_host_ip = ntohl(local_net_ip.s_addr);
+
+    #ifdef DEBUG
+      printf("[+] addr: %x\n", local_host_ip);
+    #endif
+
+     /*
+    * we just use three bytes 
+    * shift right 8bit
+    * then shift legt 8bit
+    */
+    local_host_ip = local_host_ip >> 8;
+    local_host_ip = local_host_ip << 8;
+
+    #ifdef DEBUG
+      printf("[+] addr: %x\n", local_host_ip);
+    #endif
+
+    int i;
+    for(i = 1; i < 255; i++)
+    {
+        ip.s_addr = htonl(local_host_ip + i);
+        if( test_alive(ip) )
+        {
+            printf("[+] Host %s is alive\n", inet_ntoa(ip));
+            memcpy(&alive_ips[count], &ip, sizeof(ip));
+            count += 1;
+        }
+    }
+
+    return count;
 }
 
 /*
