@@ -37,19 +37,28 @@
 int chksum(unsigned short *buf, int size);
 void pack_icmp(void *buf, int sequence);
 struct in_addr get_local_ip(); 
-int scan_tcp_ports(struct in_addr ip);
+void* scan_tcp_ports(void *arg_ip); //arg: ip
 int scan_udp_ports(struct in_addr ip);
 int discover_hosts();
+void init();
 struct in_addr alive_ips[255];
+int tcp_count;
+int udp_count;
+unsigned short tcp_ports[10][20];
 
 int main(int argc, char const *argv[])
 {
-    struct in_addr ip;
-    char *test_ip1 = "192.168.109.245";
-    inet_aton(test_ip1, &ip);
+    int i;
+    int host_count = discover_hosts();
+    //fflush(stdout);
+    //printf("[+] Found %d hosts\n", host_count);
+    printf("\n[-] Skipping the first host(gateway)\n");
+    for(i = 1; i < host_count; i++)
+    {   
+        scan_tcp_ports((void *)&alive_ips[i]);
+        scan_udp_ports(alive_ips[i]);
+    }
 
-    scan_udp_ports(ip);
-    //discover_hosts();
     return 0;
 }
 
@@ -106,7 +115,7 @@ struct in_addr get_local_ip()
     sock = socket(AF_INET, SOCK_DGRAM, 0);
     if (sock == -1)
     {
-        perror("[-] tcp socket failed\n");
+        perror("[-] tcp socket failed");
         exit(0);
     }
 
@@ -115,7 +124,7 @@ struct in_addr get_local_ip()
 
     if (ioctl(sock, SIOCGIFADDR, &ifr) < 0)
     {
-    	perror("[-] ioctl failed\n");
+    	perror("[-] ioctl failed");
     	exit(0);
     }
 
@@ -123,19 +132,25 @@ struct in_addr get_local_ip()
     memcpy(&ip, &(addr.sin_addr), sizeof(struct in_addr));
 
     #ifdef DEBUG
-      printf("[+] local network address: %s\n", inet_ntoa(ip));
+      printf("[+] local network address: %s\n\n", inet_ntoa(ip));
     #endif
 
     close(sock);
     return ip;
 }
 
+void init()
+{
+    tcp_count = 0;
+    udp_count = 0;
+    memset(alive_ips, 0, 255 * sizeof(struct in_addr));
+    memset(tcp_ports, 0, 200 * sizeof(unsigned short));
+}
 /*
 * return the count of hosts alive
 */
 int discover_hosts()
 {
-    memset(alive_ips, 0, 255 * sizeof(struct in_addr));
     struct in_addr local_net_ip, ip_addr; //big endian
     unsigned int local_host_ip;  //little endian
     int count = 0;  //the count of hosts alive
@@ -158,6 +173,8 @@ int discover_hosts()
     //recveiving and send buffer
     char *send_buf = (char *)malloc(0x100);
     char *recv_buf = (char *)malloc(0x200);
+    memset(send_buf, 0, 0x100);
+    memset(recv_buf, 0, 0x200);
     
     struct protoent *proto = NULL;
 	proto = getprotobyname("icmp");
@@ -244,6 +261,7 @@ int discover_hosts()
         }
     }
 
+    printf("[+] Scanning finished! There are %d hosts alive.\n", count);
     free(send_buf);
     free(recv_buf);
     send_buf = NULL;
@@ -255,10 +273,12 @@ int discover_hosts()
 /*
 * scan the host's tcp ports
 */
-int scan_tcp_ports(struct in_addr ip)
+void *scan_tcp_ports(void *arg_ip)
 {
+    struct in_addr ip;
+    memcpy(&ip, (struct in_addr *)arg_ip, sizeof(ip));
     int sockfd;
-    int ret, count = 0;
+    int ret;
     
     struct sockaddr_in scan_addr;
     struct servent *server;
@@ -266,6 +286,7 @@ int scan_tcp_ports(struct in_addr ip)
     scan_addr.sin_family = AF_INET;
     memcpy(&(scan_addr.sin_addr), &ip, sizeof(ip));
 
+    printf("\n[...] Starting scanning %s's ports\n", inet_ntoa(ip));
     /*
     * scanning tcp ports
     */
@@ -279,14 +300,16 @@ int scan_tcp_ports(struct in_addr ip)
         {
             server = getservbyport( htons(temp_port), "tcp");
             printf("[+] opened tcp port: %d/%s\n", temp_port, (server == NULL) ? "unknow" : server->s_name);
-            count += 1;
+            tcp_count += 1;
+
         }
+
+        close(sockfd);
     }
-
-    close(sockfd);
-    return count;
+    
+    printf("\n");
+    return NULL;
 }
-
 
 /*
 * scan the host's udp ports
@@ -294,8 +317,6 @@ int scan_tcp_ports(struct in_addr ip)
 int scan_udp_ports(struct in_addr ip)
 {
     int send_fd, recv_fd;
-    int count = 0;
-
     send_fd = socket(AF_INET, SOCK_DGRAM, IPPROTO_UDP);
     if(  send_fd < 0 )
     {
@@ -312,6 +333,7 @@ int scan_udp_ports(struct in_addr ip)
 
     struct sockaddr_in send_addr;
     char *recv_buf = (char *)malloc(0x100);
+    memset(recv_buf, 0, 0x100);
     char *send_buf = (char *)malloc(0x10);
     memset(send_buf, 0x41, 0x10);
 
@@ -320,11 +342,13 @@ int scan_udp_ports(struct in_addr ip)
     send_addr.sin_addr.s_addr = ip.s_addr;
 
     int port;
-    for( port = 1; port < 65535; port++ )
+    for( port = 1; port < 1000; port++ )
     {
         send_addr.sin_port = htons(port);
         int errno;
+
         errno = sendto(send_fd, NULL, 0, 0, (struct sockaddr *)&send_addr, sizeof(send_addr));
+       
         if( errno < 0 )
         {
             perror("[-] sendto failed");
@@ -367,11 +391,8 @@ int scan_udp_ports(struct in_addr ip)
                 data_iphdr_len = data_ip->ip_hl << 2;
                 udp = (struct udphdr *)((char *)data_ip + data_iphdr_len);
 
-                if( ip->ip_src.s_addr == send_addr.sin_addr.s_addr &&
-                    icmp->icmp_type == ICMP_UNREACH &&
-                    icmp->icmp_code == ICMP_UNREACH_PORT &&
-                    data_ip->ip_p == IPPROTO_UDP &&
-                    udp->dest == send_addr.sin_port )
+                if( icmp->icmp_type == ICMP_UNREACH &&
+                    icmp->icmp_code == ICMP_UNREACH_PORT )
                 {
                     break;
                 }
@@ -379,7 +400,7 @@ int scan_udp_ports(struct in_addr ip)
             //select() <=0
             else
             {
-                count +=1;
+                udp_count +=1;
                 struct servent *server;
                 server = getservbyport(htons(port), "udp");
                 printf("[+] opened udp ports: %d/%s\n", port, (server == NULL) ? "unknow" : server->s_name);
@@ -387,12 +408,23 @@ int scan_udp_ports(struct in_addr ip)
             }
             
 
-        }//end while
+        }//end while  
+        
+        /*
+        * there is a limit in linux kernel that
+        * the sending frequency of icmp error packet can't be too fast.
+        * so the scanning is very slow.
+        */
+        sleep(1); 
+       
     }//end for
 
+    printf("\n");
     close(send_fd);
     close(recv_fd);
     free(recv_buf);
-    recv_buf = 0;
-    return count;
+    recv_buf = NULL;
+    free(send_buf);
+    send_buf = NULL;
+    return udp_count;
 }
